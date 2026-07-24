@@ -1,0 +1,231 @@
+---
+title: "DACSS 690C: Homework 2"
+author: "Fela Williams"
+output: html_document
+---
+
+First, load the required packages:
+```{r}
+library(ggraph)
+library(igraph)
+library(ggplot2)
+```
+# Part 1
+
+Read in the GitHub link that pulls data from my repo:
+```{r}
+# open file
+set.seed(1111)
+rm(list = ls())
+
+dataGitLink='https://github.com/felawilliams/690C-homework-2/raw/main/hollywood.graphml'
+```
+
+Below, the `actors` igraph is created, and the `wonOscar` values are relabeled:
+```{r}
+actors=read_graph(dataGitLink,format='graphml')
+
+V(actors)$wonOscar=ifelse(V(actors)$wonOscar==1,'Yes','No')
+```
+
+Next, the network graph is created:
+```{r}
+# add plot layers
+finalGraph=ggraph(graph = actors) + 
+  geom_edge_link(aes(edge_width = as.ordered(weight) ),
+                 color='grey70' ) + 
+  geom_node_point() + theme_graph() +
+  geom_node_text(aes(label = name,color = as.factor(wonOscar)),
+                 size=5)
+```
+
+```{r, warning=FALSE}
+# add labels and populate plot
+finalGraph + labs(edge_width="Movies in commmon",
+                  color="Won Oscar as actor")
+```
+
+# Part 2
+
+Below, the node central measures (eigen_centrality, closeness, betweenness) are computed and summarized in a table:
+
+```{r}
+# compute measures
+eigen=eigen_centrality(actors)$vector
+
+close=closeness(actors,normalized=T)
+
+betw=betweenness(actors,normalized=T)
+```
+
+
+```{r}
+# summarize measures in a data frame
+DFCentrality=as.data.frame(cbind(eigen,close,betw),stringsAsFactors = F)
+names(DFCentrality)=c('Eigenvector','Closeness','Betweenness')
+
+DFCentrality$person=row.names(DFCentrality)
+row.names(DFCentrality)=NULL
+
+# populate table head
+head(DFCentrality)
+```
+
+#Part 3
+
+A correlation plot with the previous measures is created:
+```{r}
+ggplot(DFCentrality, aes(x=Betweenness, y=Closeness)) + 
+    theme_classic() +
+    geom_text(aes(label=person,size=Eigenvector),show.legend = T,alpha=0.5) 
+```
+**Result**: 
+
+Nodes with low centrality tend to score low across the three central measures, as seen in the bottom left corner of the plot. 
+
+Betweenness and closeness appear to have a positive relationship -- as the slope between the two increases.
+
+Robin Williams is a notable node with high betweenness and high eigenvector scores, but comparatively low closeness.
+
+# Part 4
+
+Below is the  code needed to redo `finalGraph` plot to just show the Hub nodes:
+```{r}
+# identify hub nodes
+HubNodes=dplyr::slice_max(DFCentrality, order_by = Eigenvector, n = 2)$person
+HubNodes
+```
+
+```{r}
+# relabel so that plot only shows hub nodes
+NodeCount=length(V(actors))
+
+V(actors)$label=''
+
+for (index in seq(1:NodeCount)){
+    currentName=V(actors)$name[index]
+    if (currentName%in%HubNodes){
+            V(actors)$label[index]=currentName
+    }
+}
+```
+
+```{r}
+# create plot
+base=ggraph(graph = actors)
+
+base  + geom_node_label(aes(label = label), 
+                        repel = TRUE,
+                        show.legend = F,
+                        color='red') + 
+         geom_edge_link(alpha=0.1)
+```
+# Part 5
+
+Below are the computations needed to help determine of communities could be present:
+
+```{r}
+#simulate networks
+set.seed(123)
+replicates <- 1000  
+
+random_transitivities <- replicate(replicates, {
+  RandomNet <- rewire(actors, 
+                      keeping_degseq(niter = gsize(actors) * 10))
+  transitivity(RandomNet, type = "global")
+})
+```
+
+
+```{r}
+# compute average transativity
+mean_random_transitivities=mean(random_transitivities)
+```
+
+```{r}
+# compute empirical transativity
+empirical_transitivity <- transitivity(actors, type = "global")
+```
+
+```{r}
+# summarize computations in a data frame
+report_table <- data.frame(
+  Metric = c("actors transitivity", "Random-network mean", "Ratio"),
+  Value  = round(c(empirical_transitivity,
+                    mean_random_transitivities,
+                    empirical_transitivity / mean_random_transitivities), 4)
+)
+```
+
+```{r}
+print(report_table)
+```
+
+**Result**: 
+
+The ratio is above 1, so it is possible that communities are present
+
+# Part 6
+
+Since the presence of communities is possible, community detection algorithms are run below (Louvain, walktrap, fast greedy, infomap, Girvan-Newman):
+
+```{r}
+# run community-detection algorithms
+algos <- list(
+  louvain          =  { set.seed(123); cluster_louvain(actors) },
+  walktrap         = cluster_walktrap(actors),
+  fast_greedy      = cluster_fast_greedy(actors),
+  infomap          = cluster_infomap(actors),
+  edge_betweenness = cluster_edge_betweenness(actors)
+)
+```
+
+
+```{r}
+# summarize number of clusters, modularity, and cluster sizes in a data frame
+summary_table <- data.frame(
+  algorithm   = names(algos),
+  n_clusters  = sapply(algos, length),
+  modularity_Q  = sapply(algos, modularity),
+  cluster_sizes = sapply(algos, function(cl) {
+    paste(sort(sizes(cl), decreasing = TRUE), collapse = ", ")
+  })
+)
+```
+
+
+```{r}
+# summarize computations in a data frame
+summary_table <- summary_table[order(-summary_table$modularity_Q), ]
+rownames(summary_table) <- NULL
+
+print(summary_table)
+```
+**Best Result**:
+Girvan-Newman tied for best, and since it is a more common algorithm, I've chosen to consider it to be the algorithm with the best result.
+
+Below are the codes to plot this best result.
+
+```{r}
+# save each result
+for (name in names(algos)) {
+  memb <- membership(algos[[name]])
+  attr_name <- name
+  actors <- set_vertex_attr(actors, attr_name,
+                               index = names(memb),
+                               value = as.vector(memb))
+}
+# verify new attributes were added
+vertex_attr_names(actors)
+```
+
+```{r}
+# plotting best algorithm
+
+base=ggraph(graph =actors) +
+          geom_edge_link(alpha=0.2)
+
+base + geom_node_point(aes(color=as.factor(edge_betweenness)), 
+                       show.legend = T, size=4)
+```
+

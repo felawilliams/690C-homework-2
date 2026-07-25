@@ -4,8 +4,8 @@ author: "Fela Williams"
 output: html_document
 ---
 
-First, load the required packages:
 ```{r}
+# load in libraries
 library(ggraph)
 library(igraph)
 library(ggplot2)
@@ -14,7 +14,7 @@ library(ggplot2)
 
 Read in the GitHub link that pulls data from my repo:
 ```{r}
-# open file
+# set seed and read in link
 set.seed(1111)
 rm(list = ls())
 
@@ -23,6 +23,7 @@ dataGitLink='https://github.com/felawilliams/690C-homework-2/raw/main/hollywood.
 
 Below, the `actors` igraph is created, and the `wonOscar` values are relabeled:
 ```{r}
+# read in data and clean table
 actors=read_graph(dataGitLink,format='graphml')
 
 V(actors)$wonOscar=ifelse(V(actors)$wonOscar==1,'Yes','No')
@@ -75,6 +76,7 @@ head(DFCentrality)
 
 A correlation plot with the previous measures is created:
 ```{r}
+# plot measures and add layers
 ggplot(DFCentrality, aes(x=Betweenness, y=Closeness)) + 
     theme_classic() +
     geom_text(aes(label=person,size=Eigenvector),show.legend = T,alpha=0.5) 
@@ -158,6 +160,7 @@ report_table <- data.frame(
 ```
 
 ```{r}
+# populate table
 print(report_table)
 ```
 
